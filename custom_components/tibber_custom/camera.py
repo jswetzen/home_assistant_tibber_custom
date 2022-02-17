@@ -1,6 +1,9 @@
 import datetime
 import logging
 from pathlib import Path
+from xmlrpc.client import Boolean
+
+from typing import Any, Dict, Optional
 
 import matplotlib
 import matplotlib.dates as mdates
@@ -9,6 +12,7 @@ import matplotlib.pyplot as plt
 from dateutil import tz
 from homeassistant.components.local_file.camera import LocalFile
 from homeassistant.util import dt as dt_util, slugify
+from homeassistant.helpers.entity import Entity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,8 +22,62 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     dev = []
     for home in hass.data["tibber"].get_homes(only_active=True):
-        dev.append(TibberCam(home, hass))
+        dev.append(TibberCheapNightPrice(home, hass))
     async_add_entities(dev)
+
+
+class TibberCheapNightPrice(Entity):
+    def __init__(self, home, hass) -> None:
+        super().__init__()
+        self._name = home.info["viewer"]["home"]["appNickname"]
+        if self._name is None:
+            self._name = home.info["viewer"]["home"]["address"].get("address1", "")
+        self._home = home
+        self.hass = hass
+        self._cons_data = []
+        self._last_update = dt_util.now() - datetime.timedelta(hours=1)
+        self._find_period = (22, 6)  # 22:00 - 06:00 inclusive
+        self._find_hours = 2  # Find the cheapest 2 hours
+        self._cheapest_period = None
+        self._state = None
+        # hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._generate_fig)
+
+    @property
+    def state(self) -> Optional[Boolean]:
+        return self._state
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def device_state_attributes(self) -> Dict[str, Any]:
+        return {"cheapest_period": self._cheapest_period}
+
+    async def async_update(self):
+        # Skip updates if it's too recent
+        if (dt_util.now() - self._last_update) < datetime.timedelta(minutes=1):
+            return
+        self._last_update = dt_util.now()
+
+        if self._cheapest_period and self._cheapest_period[1] < dt_util.now():
+            self._state = False
+
+        if self._cheapest_period and self._cheapest_period[0] > dt_util.now():
+            self._state = True
+
+        # Time to fetch new price info
+        if (self._home.last_data_timestamp - dt_util.now()).total_seconds() > 11 * 3600:
+            await self._home.update_info_and_price_info()
+
+            cheapest = float("inf")
+            for key, price_total in self._home.price_total.items()[: -self._find_hours]:
+                key = dt_util.as_local(dt_util.parse_datetime(key))
+                # if key.hour <
 
 
 class TibberCam(LocalFile):
@@ -46,7 +104,8 @@ class TibberCam(LocalFile):
 
     async def _generate_fig(self):
         if (dt_util.now() - self._last_update) < datetime.timedelta(minutes=1):
-            return
+            pass
+            # return
 
         if (self._home.last_data_timestamp - dt_util.now()).total_seconds() > 11 * 3600:
             await self._home.update_info_and_price_info()
@@ -213,3 +272,4 @@ class TibberCam(LocalFile):
 
         plt.close(fig)
         plt.close("all")
+

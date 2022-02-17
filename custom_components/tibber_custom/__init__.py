@@ -1,11 +1,11 @@
-"""Tibber custom"""
+"""Tibber lowest price at night"""
 import logging
 
 from homeassistant.const import EVENT_HOMEASSISTANT_START
 from homeassistant.helpers import discovery
 
 
-DOMAIN = "tibber_custom"
+DOMAIN = "tibber_night_price"
 
 DEPENDENCIES = ["tibber"]
 
